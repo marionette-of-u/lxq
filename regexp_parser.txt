@@ -1,0 +1,38 @@
+%token charactor<node*> vertical_bar dot asterisk plus question l_bracket r_bracket l_paren r_paren concat hyphen;
+%namespace regex_parser;
+
+S<node*>
+	: [make_identity] LevelC(0)
+	;
+
+LevelC<node*>
+	: [make_or]       LevelB(0) vertical_bar LevelC(1)
+	| [make_concat]   LevelB(0) LevelC(1)
+	| [make_identity] LevelB(0)
+	;
+
+LevelB<node*>
+	: [make_kleene]      LevelA(0) asterisk
+	| [make_kleene_plus] LevelA(0) plus
+	| [make_one_or_zero] LevelA(0) question
+	| [make_identity]    LevelA(0)
+	;
+
+LevelA<node*>
+	: [make_charactor] charactor(0)
+	| [make_dot]       dot
+	| [make_class]     l_bracket CharactorSequence(0) r_bracket
+	| [make_identity]  l_paren LevelC(0) r_paren
+	;
+
+CharactorSequence<node*>
+	: [make_seq] charactor(0)
+	| [make_seq] CharactorSequence(0) charactor(1)
+	| [make_class_range] CharactorRange(0)
+	| [make_class_range] CharactorSequence(0) CharactorRange(1)
+	;
+
+CharactorRange<node*>
+	: [make_range] charactor(0) hyphen charactor(1)
+	;
+
