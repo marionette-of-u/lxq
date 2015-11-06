@@ -68,7 +68,7 @@ public:
     class term_sequence : public std::vector<term>{
     public:
         term_sequence() : std::vector<term>(), semantic_data(){}
-        term_sequence(term_sequence const &other) : std::vector<term>(other), semantic_data(other.semantic_data){}
+        term_sequence(term_sequence const &other) : std::vector<term>(other), semantic_data(other.semantic_data), tag(other.tag){}
         term_sequence(std::initializer_list<term> list, semantic_type const &s) : std::vector<term>(list), semantic_data(s){}
         semantic_type semantic_data;
         term tag = epsilon_functor()();

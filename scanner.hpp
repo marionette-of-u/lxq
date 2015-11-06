@@ -160,7 +160,7 @@ namespace scanner{
     };
 
     struct lalr_generator_semantic_type{
-        vstring_range action, type;
+        vstring_range action;
         std::map<std::size_t, rhs_seq_element_type const*> const *arg_to_element;
     };
 

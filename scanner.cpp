@@ -340,15 +340,16 @@ namespace scanner{
         {
             std::size_t iterate_count = 0;
             for(auto iter : ordered_token_iters){
-                if(translator_token_to_lexer_map.find(iter->first.value.to_str()) == translator_token_to_lexer_map.end()){
-                    continue;
-                }
                 lalr_generator_type::symbol_data_type symbol_data;
                 symbol_data.priority = iter->second.priority;
                 using linkdir_type = lalr_generator_type::linkdir;
                 symbol_data.dir = iter->second.dir == linkdir::nonassoc ? linkdir_type::nonassoc : iter->second.dir == linkdir::left ? linkdir_type::left : linkdir_type::right;
                 lalr_generator.symbol_data_map.insert(std::make_pair(lalr_generator.symbol_manager.set_terminal(iter->first.value), symbol_data));
-                translator_token_to_lexer_map[iter->first.value.to_str()]->identifier = iterate_count + 1;
+                if(translator_token_to_lexer_map.find(iter->first.value.to_str()) == translator_token_to_lexer_map.end()){
+                    lalr_generator.symbol_manager.set_terminal(iter->first.value);
+                }else{
+                    translator_token_to_lexer_map[iter->first.value.to_str()]->identifier = iterate_count + 1;
+                }
                 ++iterate_count;
             }
         }
@@ -359,9 +360,9 @@ namespace scanner{
         }
 
         for(auto &iter : rules){
-            for(auto &j : iter.second){
-                lalr_generator_type::rule_rhs &rhs = lalr_generator.grammar[lalr_generator.symbol_manager.set_nonterminal(iter.first.value)];
-                j.make_arg_to_element_map();
+            lalr_generator_type::rule_rhs &rhs = lalr_generator.grammar[lalr_generator.symbol_manager.set_nonterminal(iter.first.value)];
+            for(auto &seq : iter.second){
+                seq.make_arg_to_element_map();
             }
         }
 
@@ -381,12 +382,12 @@ namespace scanner{
             }
 
             for(auto &iter : rules){
-                for(auto &term_sequence : iter.second){
+                for(auto &seq : iter.second){
                     std::set<std::size_t> sequential_check;
-                    for(auto &term_iter : term_sequence){
-                        if(!term_sequence.tag.value.to_str().empty()){
-                            if(token_map.find(term_sequence.tag) == token_map.end()){
-                                exception_seq.push_back(scanning_exception("'" + term_sequence.tag.value.to_str() + "', tag is not found.", term_sequence.tag.char_num, term_sequence.tag.word_num, term_iter.identifier.line_num));
+                    for(auto &term_iter : seq){
+                        if(!seq.tag.value.to_str().empty()){
+                            if(token_map.find(seq.tag) == token_map.end()){
+                                exception_seq.push_back(scanning_exception("'" + seq.tag.value.to_str() + "', tag is not found.", seq.tag.char_num, seq.tag.word_num, seq.tag.line_num));
                             }
                         }
 
@@ -411,7 +412,7 @@ namespace scanner{
                         }
                         if(error){
                             std::string str;
-                            for(auto &term_iter : term_sequence){
+                            for(auto &term_iter : seq){
                                 str += term_iter.identifier.value.to_str() + " ";
                             }
                             str.resize(str.size() - 1);
@@ -452,6 +453,22 @@ namespace scanner{
 
             if(!exception_seq.empty()){
                 throw exception_seq;
+            }
+        }
+
+        for(auto &iter : rules){
+            lalr_generator_type::rule_rhs &rhs = lalr_generator.grammar[lalr_generator.symbol_manager.set_nonterminal(iter.first.value)];
+            for(auto &seq : iter.second){
+                lalr_generator_type::term_sequence term_sequence;
+                for(auto &kter : seq){
+                    term_sequence.push_back(lalr_generator.symbol_manager.get(kter.identifier.value));
+                }
+                term_sequence.semantic_data.arg_to_element = &seq.arg_to_element;
+                term_sequence.semantic_data.action = seq.semantic_action.value;
+                if(!seq.tag.value.empty()){
+                    term_sequence.tag = lalr_generator.symbol_manager.get(seq.tag.value);
+                }
+                rhs.insert(term_sequence);
             }
         }
 
@@ -772,7 +789,7 @@ namespace lxq{
         parser(SemanticDataProc &semantic_data_proc) : semantic_data_proc(semantic_data_proc){}
 
         template<class InputIter>
-        bool parse(std::unique_ptr<semantic_data> &value, InputIter first, InputIter last){
+        InputIter parse(std::unique_ptr<semantic_data> &value, InputIter first, InputIter last){
             parsing_data const &table = parsing_data_storage();
             std::vector<std::size_t> state_stack;
             std::vector<std::unique_ptr<semantic_data>> value_stack;
@@ -784,9 +801,7 @@ namespace lxq{
                 auto const &table_second(table.parsing_table.find(s)->second);
                 auto iter = table_second.find(t);
                 if(iter == table_second.end()){
-                    std::stringstream ss;
-                    ss << "parsing error, 'no action'. :" << token.line_num << ":" << token.char_num;
-                    throw std::runtime_error(ss.str());
+                    break;
                 }
                 parsing_table_item const &i = table.parsing_table.find(s)->second.find(t)->second;
                 if(i.action == parsing_table_item::enum_action::shift){
@@ -799,9 +814,7 @@ namespace lxq{
                     std::size_t norm = p.second.second.norm;
                     state_stack.resize(state_stack.size() - norm);
                     if(state_stack.empty()){
-                        std::stringstream ss;
-                        ss << "parsing error, 'reduce'. :" << token.line_num << ":" << token.char_num;
-                        throw std::runtime_error(ss.str());
+                        break;
                     }
                     std::vector<std::unique_ptr<semantic_data>> arg;
                     arg.reserve(norm);
@@ -813,16 +826,14 @@ namespace lxq{
                     value_stack.push_back(std::move(p.second.second.call(*this, arg)));
                     state_stack.push_back(table.goto_table.find(state_stack.back())->second.find(p.second.first)->second);
                 }else if(i.action == parsing_table_item::enum_action::accept){
-                    if(state_stack.empty()){
-                        std::stringstream ss;
-                        ss << "parsing error, 'accept'. :" << token.line_num << ":" << token.char_num;
-                        throw std::runtime_error(ss.str());
+                    if(state_stack.size() != 1){
+                        break;
                     }
+                    value = std::move(value_stack.front());
                     break;
                 }
             }
-            value = std::move(value_stack.front());
-            return true;
+            return first;
         }
     };
 }

@@ -4,7 +4,7 @@
 int main(int argc, char *argv[]){
     if(argc != 2 && argc != 3){
         std::cout << "usage: lxq ifile [ofiles_directry]" << std::endl;
-        return;
+        return 0;
     }
 
     std::string place;
