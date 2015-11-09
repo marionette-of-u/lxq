@@ -17,11 +17,15 @@
 #include <map>
 #include <cctype>
 #include <cstdio>
-#include "regex_parser.hpp"
+#include "regexp_parser.hpp"
 
 namespace automaton{
     class node{
     public:
+        enum{
+            eos = 128
+        };
+
         node() = default;
         node(const node &other);
         node(node &&other);

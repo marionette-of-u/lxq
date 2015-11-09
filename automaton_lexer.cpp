@@ -1,211 +1,593 @@
 #include "automaton_lexer.hpp"
 #include "common.hpp"
 
-namespace regex_parser{
+namespace regexp_parser{
     struct token{
         char c;
         int type;
     };
 
-    struct node{
-        enum op_type_enum{
-            op_or,
-            op_dot,
-            op_concat,
-            op_kleene,
-            op_kleene_plus,
-            op_one_or_zero,
-            op_seq,
-            op_range,
-            op_class,
-            op_charactor
-        };
+    class regexp_ast{
+    public:
+        regexp_ast() = default;
+        regexp_ast(const char c) : c(c){}
+        regexp_ast(const regexp_ast &other) : c(other.c){
+            for(auto &iter : other.node_vec){
+                node_vec.push_back(iter->clone());
+            }
+        }
+
+        regexp_ast(regexp_ast &&other) : c(std::move(other.c)), node_vec(std::move(other.node_vec)){}
+
+        virtual ~regexp_ast(){
+            for(auto &iter : node_vec){
+                delete iter;
+            }
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const{
+            assert(false);
+            return (std::numeric_limits<std::size_t>::max)();
+        }
+
+        virtual regexp_ast *clone() const = 0;
+        template<class Derived>
+        regexp_ast *clone_impl() const{
+            regexp_ast *ptr = new Derived;
+            ptr->c = c;
+            for(auto &iter : node_vec){
+                ptr->node_vec.push_back(iter->clone());
+            }
+            return ptr;
+        }
 
         char c;
-        op_type_enum op_type;
-        std::vector<node*> node_vec;
+        std::vector<regexp_ast*> node_vec;
+    };
 
-        std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const{
+    class regexp_union : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_union>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
             std::size_t r;
-            switch(op_type){
-            case op_charactor:
-                {
-                    pool.push_back(automaton::node());
-                    pool[start].edge.push_back(std::make_pair(c, pool.size() - 1));
-                    r = pool.size() - 1;
-                }
-                break;
+            std::size_t e1 = node_vec[0]->to_NFA(start, pool);
+            std::size_t e2 = node_vec[1]->to_NFA(start, pool);
+            pool.push_back(automaton::node());
+            r = pool.size() - 1;
+            pool[e1].edge.push_back(std::make_pair('\0', r));
+            pool[e2].edge.push_back(std::make_pair('\0', r));
+            return r;
+        }
+    };
 
-            case op_class:
-                {
-                    pool.push_back(automaton::node());
-                    r = pool.size() - 1;
-                    for(std::size_t i = 0; i < node_vec.size(); ++i){
-                        for(std::size_t j = 0; j < node_vec[i]->node_vec.size(); ++j){
-                            if(node_vec[i]->node_vec[j]->op_type == op_charactor){
-                                pool[start].edge.push_back(std::make_pair(node_vec[i]->node_vec[j]->c, r));
-                            }else if(node_vec[i]->node_vec[j]->op_type == op_range){
-                                if(node_vec[i]->node_vec[j]->node_vec[0]->c > node_vec[i]->node_vec[j]->node_vec[1]->c){
-                                    std::swap(node_vec[i]->node_vec[j]->node_vec[0]->c, node_vec[i]->node_vec[j]->node_vec[1]->c);
-                                }
+    class regexp_concat : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_concat>();
+        }
 
-                                for(char c = node_vec[i]->node_vec[j]->node_vec[0]->c; c <= node_vec[i]->node_vec[j]->node_vec[1]->c; ++c){
-                                    if(c == 0){ continue; }
-                                    pool[start].edge.push_back({});
-                                    pool[start].edge.back().first = c;
-                                    pool[start].edge.back().second = r;
-                                }
-                            }
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            r = node_vec[0]->to_NFA(start, pool);
+            r = node_vec[1]->to_NFA(r, pool);
+            return r;
+        }
+    };
+
+    class regexp_kleene : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_kleene>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            r = node_vec[0]->to_NFA(start, pool);
+            pool[start].edge.push_back(std::make_pair('\0', r));
+            pool[r].edge.push_back(std::make_pair('\0', start));
+            return r;
+        }
+    };
+
+    class regexp_kleene_plus : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_kleene_plus>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            std::size_t q = node_vec[0]->to_NFA(start, pool);
+            r = node_vec[0]->to_NFA(q, pool);
+            pool[q].edge.push_back(std::make_pair('\0', r));
+            pool[r].edge.push_back(std::make_pair('\0', q));
+            return r;
+        }
+    };
+
+    class regexp_one_or_zero : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_one_or_zero>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            pool.push_back(automaton::node());
+            r = pool.size() - 1;
+            std::size_t n = node_vec[0]->to_NFA(start, pool);
+            pool[n].edge.push_back(std::make_pair('\0', r));
+            pool[start].edge.push_back(std::make_pair('\0', r));
+            return r;
+        }
+    };
+
+    class regexp_range : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_range>();
+        }
+    };
+
+    class regexp_char : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_char>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            pool.push_back(automaton::node());
+            pool[start].edge.push_back(std::make_pair(c, pool.size() - 1));
+            r = pool.size() - 1;
+            return r;
+        }
+    };
+
+    class regexp_set : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_set>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            pool.push_back(automaton::node());
+            r = pool.size() - 1;
+            for(std::size_t i = 0; i < node_vec.size(); ++i){
+                for(std::size_t j = 0; j < node_vec[i]->node_vec.size(); ++j){
+                    if(dynamic_cast<regexp_char*>(node_vec[i]->node_vec[j])){
+                        pool[start].edge.push_back(std::make_pair(node_vec[i]->node_vec[j]->c, r));
+                    }else if(dynamic_cast<regexp_range*>(node_vec[i]->node_vec[j])){
+                        if(node_vec[i]->node_vec[j]->node_vec[0]->c > node_vec[i]->node_vec[j]->node_vec[1]->c){
+                            std::swap(node_vec[i]->node_vec[j]->node_vec[0]->c, node_vec[i]->node_vec[j]->node_vec[1]->c);
+                        }
+                        for(char c = node_vec[i]->node_vec[j]->node_vec[0]->c; c <= node_vec[i]->node_vec[j]->node_vec[1]->c; ++c){
+                            if(c == 0){ continue; }
+                            pool[start].edge.push_back({});
+                            pool[start].edge.back().first = c;
+                            pool[start].edge.back().second = r;
                         }
                     }
                 }
-                break;
+            }
+            return r;
+        }
+    };
 
-            case op_one_or_zero:
-                {
-                    pool.push_back(automaton::node());
-                    r = pool.size() - 1;
-                    std::size_t n = node_vec[0]->to_NFA(start, pool);
-                    pool[n].edge.push_back(std::make_pair('\0', r));
-                    pool[start].edge.push_back(std::make_pair('\0', r));
-                }
-                break;
+    class regexp_neagtive_set : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_neagtive_set>();
+        }
 
-            case op_kleene_plus:
-                {
-                    std::size_t q = node_vec[0]->to_NFA(start, pool);
-                    r = node_vec[0]->to_NFA(q, pool);
-                    pool[q].edge.push_back(std::make_pair('\0', r));
-                    pool[r].edge.push_back(std::make_pair('\0', q));
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            std::set<char> set;
+            for(int i = -127; i < 128; ++i){
+                set.insert(static_cast<char>(i));
+            }
+            pool.push_back(automaton::node());
+            r = pool.size() - 1;
+            for(std::size_t i = 0; i < node_vec.size(); ++i){
+                for(std::size_t j = 0; j < node_vec[i]->node_vec.size(); ++j){
+                    if(dynamic_cast<regexp_char*>(node_vec[i]->node_vec[j])){
+                        set.erase(node_vec[i]->node_vec[j]->c);
+                    }else if(dynamic_cast<regexp_range*>(node_vec[i]->node_vec[j])){
+                        if(node_vec[i]->node_vec[j]->node_vec[0]->c > node_vec[i]->node_vec[j]->node_vec[1]->c){
+                            std::swap(node_vec[i]->node_vec[j]->node_vec[0]->c, node_vec[i]->node_vec[j]->node_vec[1]->c);
+                        }
+                        for(int c = node_vec[i]->node_vec[j]->node_vec[0]->c; c <= node_vec[i]->node_vec[j]->node_vec[1]->c; ++c){
+                            set.erase(c);
+                        }
+                    }
                 }
-                break;
+            }
+            for(char c : set){
+                if(c == 0){ continue; }
+                pool[start].edge.push_back({});
+                pool[start].edge.back().first = c;
+                pool[start].edge.back().second = r;
+            }
+            return r;
+        }
+    };
 
-            case op_kleene:
-                {
-                    r = node_vec[0]->to_NFA(start, pool);
-                    pool[start].edge.push_back(std::make_pair('\0', r));
-                    pool[r].edge.push_back(std::make_pair('\0', start));
-                }
-                break;
+    class regexp_set_item : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_set_item>();
+        }
+    };
 
-            case op_concat:
-                {
-                    r = node_vec[0]->to_NFA(start, pool);
-                    r = node_vec[1]->to_NFA(r, pool);
-                }
-                break;
+    class regexp_eos : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_eos>();
+        }
 
-            case op_or:
-                {
-                    std::size_t e1 = node_vec[0]->to_NFA(start, pool);
-                    std::size_t e2 = node_vec[1]->to_NFA(start, pool);
-                    pool.push_back(automaton::node());
-                    r = pool.size() - 1;
-                    pool[e1].edge.push_back(std::make_pair('\0', r));
-                    pool[e2].edge.push_back(std::make_pair('\0', r));
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            pool.push_back(automaton::node());
+            pool[start].edge.push_back(std::make_pair(automaton::node::eos, pool.size() - 1));
+            r = pool.size() - 1;
+            return r;
+        }
+    };
+
+    class regexp_after_nline : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_after_nline>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            pool.push_back(automaton::node());
+            pool[start].edge.push_back(std::make_pair('\n', pool.size() - 1));
+            r = pool.size() - 1;
+            return node_vec[0]->to_NFA(r, pool);
+        }
+    };
+
+    class regexp_any : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_any>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r;
+            pool.push_back(automaton::node());
+            r = pool.size() - 1;
+            for(int i = -127; i <= 128; ++i){
+                if(i == 0){
+                    continue;
                 }
-                break;
+                pool[start].edge.push_back(std::make_pair(i, r));
+            }
+            return r;
+        }
+    };
+
+    class regexp_str : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_str>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r = start;
+            for(auto &iter : node_vec){
+                r = iter->to_NFA(r, pool);
+            }
+            return r;
+        }
+    };
+
+    class regexp_char_seq : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_char_seq>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r = start;
+            for(auto &iter : node_vec){
+                r = iter->to_NFA(r, pool);
+            }
+            return r;
+        }
+    };
+
+    class regexp_n_to_m : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_n_to_m>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t rr = start;
+            for(std::size_t i = 0; i < n; ++i){
+                rr = node_vec[0]->to_NFA(rr, pool);
+            }
+            pool.push_back(automaton::node());
+            std::size_t r = pool.size() - 1;
+            for(std::size_t i = 0; i < m - n; ++i){
+                rr = node_vec[0]->to_NFA(rr, pool);
+                pool[rr].edge.push_back(std::make_pair('\0', r));
             }
             return r;
         }
 
-        ~node(){
-            for(auto &i : node_vec){
-                delete i;
+        std::size_t n, m;
+    };
+
+    class regexp_n : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_n>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r = start;
+            for(std::size_t i = 0; i < n; ++i){
+                r = node_vec[0]->to_NFA(r, pool);
             }
+            return r;
+        }
+
+        std::size_t n;
+    };
+
+    class regexp_m : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_m>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            std::size_t r = start;
+            for(std::size_t i = 0; i < m; ++i){
+                r = node_vec[0]->to_NFA(r, pool);
+            }
+            std::size_t s = node_vec[0]->to_NFA(r, pool);
+            pool[s].edge.push_back(std::make_pair('\0', r));
+            return r;
+        }
+
+        std::size_t m;
+    };
+
+    class regexp_identity : public regexp_ast{
+    public:
+        virtual regexp_ast *clone() const override{
+            return clone_impl<regexp_identity>();
+        }
+
+        virtual std::size_t to_NFA(std::size_t start, automaton::node_pool &pool) const override{
+            return node_vec[0]->to_NFA(start, pool);
         }
     };
 
     struct semantic_action{
-        static node *make_identity(node *ptr){
+        regexp_ast *make_union(regexp_ast *a, regexp_ast *b, regexp_ast *c){
+            delete c;
+            regexp_union *ptr = new regexp_union;
+            ptr->node_vec.push_back(a);
+            ptr->node_vec.push_back(b);
+            ast = ptr;
             return ptr;
         }
 
-        static node *make_or(node *p, node *q){
-            node *r = new node;
-            r->op_type = node::op_or;
-            r->node_vec.push_back(p);
-            r->node_vec.push_back(q);
+        regexp_ast *make_concat(regexp_ast *a, regexp_ast *b){
+            regexp_concat *ptr = new regexp_concat;
+            ptr->node_vec.push_back(a);
+            ptr->node_vec.push_back(b);
+            ast = ptr;
+            return ptr;
+        }
+
+        regexp_ast *make_kleene(regexp_ast *a, regexp_ast *b){
+            delete b;
+            regexp_kleene *ptr = new regexp_kleene;
+            ptr->node_vec.push_back(a);
+            ast = ptr;
+            return ptr;
+        }
+
+        regexp_ast *make_kleene_plus(regexp_ast *a, regexp_ast *b){
+            delete b;
+            regexp_kleene_plus *ptr = new regexp_kleene_plus;
+            ptr->node_vec.push_back(a);
+            ast = ptr;
+            return ptr;
+        }
+
+        regexp_ast *make_one_or_zero(regexp_ast *a, regexp_ast *b){
+            delete b;
+            regexp_one_or_zero *ptr = new regexp_one_or_zero;
+            ptr->node_vec.push_back(a);
+            ast = ptr;
+            return ptr;
+        }
+
+        regexp_ast *make_n_to_m(regexp_ast *a, regexp_ast *b, regexp_ast *c, regexp_ast *d, regexp_ast *e){
+            delete d;
+            delete e;
+            regexp_ast *r = nullptr;
+            auto to_num= [](regexp_ast *ptr){
+                std::string str;
+                str += ptr->c;
+                for(auto &iter : ptr->node_vec){
+                    str += iter->c;
+                }
+                return std::atoi(str.c_str());
+            };
+            if(!c){
+                regexp_n *ptr = new regexp_n;
+                ptr->node_vec.push_back(a);
+                ptr->n = to_num(b);
+                r = ptr;
+            }else if(c->c == ','){
+                delete c;
+                regexp_m *ptr = new regexp_m;
+                ptr->node_vec.push_back(a);
+                ptr->m = to_num(b);
+                r = ptr;
+            }else{
+                regexp_n_to_m *ptr = new regexp_n_to_m;
+                ptr->node_vec.push_back(a);
+                ptr->n = to_num(b);
+                ptr->m = to_num(c);
+                r = ptr;
+            }
+            if(!r){ throw std::runtime_error("illegal form to 'r{n, m}'"); }
             return r;
         }
 
-        static node *make_concat(node *p, node *q){
-            node *r = new node;
-            r->op_type = node::op_concat;
-            r->node_vec.push_back(p);
-            r->node_vec.push_back(q);
-            return r;
+        regexp_ast *make_m(regexp_ast *a, regexp_ast *b){
+            if(a){
+                delete b;
+                return a;
+            }else{
+                return b;
+            }
         }
 
-        static node *make_kleene(node *p){
-            node *r = new node;
-            r->op_type = node::op_kleene;
-            r->node_vec.push_back(p);
-            return r;
+        regexp_ast *make_elementary_regexp(regexp_ast *a){
+            ast = a;
+            return a;
         }
 
-        static node *make_kleene_plus(node *p){
-            node *r = new node;
-            r->op_type = node::op_kleene_plus;
-            r->node_vec.push_back(p);
-            return r;
+        regexp_ast *make_group(regexp_ast *a, regexp_ast *b, regexp_ast *c){
+            delete b;
+            delete c;
+            ast = a;
+            return a;
         }
 
-        static node *make_one_or_zero(node *p){
-            node *r = new node;
-            r->op_type = node::op_one_or_zero;
-            r->node_vec.push_back(p);
-            return r;
+        regexp_ast *make_str(regexp_ast *a, regexp_ast *b, regexp_ast *c){
+            delete b;
+            delete c;
+            regexp_str *ptr = new regexp_str;
+            ptr->node_vec.push_back(a);
+            ast = ptr;
+            return ptr;
         }
 
-        static node *make_seq(node *p){
-            node *r = new node;
-            r->op_type = node::op_seq;
-            r->node_vec.push_back(p);
-            return r;
+        regexp_ast *make_char_seq(regexp_ast *a, regexp_ast *b){
+            a->node_vec.push_back(b);
+            ast = a;
+            return a;
         }
 
-        static node *make_seq(node *p, node *q){
-            p->node_vec.push_back(q);
-            return p;
+        regexp_ast *make_char_seq(regexp_ast *a){
+            ast = a;
+            return a;
         }
 
-        static node *make_class_range(node *p){
-            return make_seq(p);
+        regexp_ast *make_any(regexp_ast *a){
+            delete a;
+            regexp_any *ptr = new regexp_any;
+            ast = ptr;
+            return ptr;
         }
 
-        static node *make_class_range(node *p, node *q){
-            return make_seq(p, q);
+        regexp_ast *make_after_nline(regexp_ast *a, regexp_ast *b){
+            delete b;
+            regexp_after_nline *ptr = new regexp_after_nline;
+            ptr->node_vec.push_back(a);
+            ast = ptr;
+            return ptr;
         }
 
-        static node *make_range(node *p, node *q){
-            node *r = new node;
-            r->op_type = node::op_range;
-            r->node_vec.push_back(p);
-            r->node_vec.push_back(q);
-            return r;
+        regexp_ast *make_eos(regexp_ast *a){
+            delete a;
+            regexp_eos *ptr = new regexp_eos;
+            ast = ptr;
+            return ptr;
         }
 
-        static node *make_charactor(node *p){
-            return p;
+        regexp_ast *make_char(regexp_ast *a){
+            regexp_char *ptr = new regexp_char;
+            ptr->c = a->c;
+            delete a;
+            ast = ptr;
+            return ptr;
         }
 
-        static node *make_dot(){
-            return nullptr;
+        regexp_ast *make_char(regexp_ast *a, regexp_ast *b){
+            delete b;
+            return make_char(a);
         }
 
-        static node *make_class(node *seq){
-            node *r = new node;
-            r->op_type = node::op_class;
-            r->node_vec.push_back(seq);
-            return r;
+        regexp_ast *make_set_or_class(regexp_ast *a, regexp_ast *b, regexp_ast *c){
+            delete b;
+            delete c;
+            return a;
         }
 
-        void downcast(node *&x, node *y){
+        regexp_ast *make_set_or_class_content(regexp_ast *a, regexp_ast *b, regexp_ast *c){
+            delete b;
+            delete c;
+            regexp_set_item *ptr = new regexp_set_item;
+            ptr->node_vec.push_back(a);
+            return ptr;
+        }
+
+        regexp_ast *make_class_content(regexp_ast *a, regexp_ast *b, regexp_ast *c){
+            delete b;
+            delete c;
+            return a;
+        }
+
+        regexp_ast *make_set_content(regexp_ast *a, regexp_ast *b){
+            regexp_ast *ptr;
+            if(!b){
+                ptr = new regexp_set;
+            }else{
+                ptr = new regexp_neagtive_set;
+            }
+            delete b;
+            ptr->node_vec.push_back(a);
+            ast = ptr;
+            return ptr;
+        }
+
+        regexp_ast *make_set_item(regexp_ast *a){
+            regexp_set_item *ptr = new regexp_set_item;
+            ptr->node_vec.push_back(a);
+            return ptr;
+        }
+
+        regexp_ast *make_set_item(regexp_ast *a, regexp_ast *b){
+            a->node_vec.push_back(b->node_vec[0]);
+            b->node_vec.clear();
+            delete b;
+            return a;
+        }
+
+        regexp_ast *make_range(regexp_ast *a, regexp_ast *b){
+            regexp_range *ptr = new regexp_range;
+            ptr->node_vec.push_back(a);
+            ptr->node_vec.push_back(b);
+            return ptr;
+        }
+
+        regexp_ast *identity(regexp_ast *a){
+            ast = a;
+            return a;
+        }
+
+        void downcast(regexp_ast *&x, regexp_ast *y){
             x = y;
         }
 
-        void upcast(node *&x, node *y){
+        void upcast(regexp_ast *&x, regexp_ast *y){
             x = y;
         }
 
@@ -216,108 +598,10 @@ namespace regex_parser{
         void stack_overflow(){
             throw;
         }
+
+    private:
+        regexp_ast *ast;
     };
-
-    template<class Iter>
-    std::vector<token> tokenize(Iter first, Iter last){
-        std::vector<token> seq;
-        bool escape = false;
-        for(; first != last; ++first){
-            token t;
-            char c = *first;
-            if(escape){
-                t.type = regex_parser::token_charactor;
-                switch(c){
-                case '0':
-                    t.c = '\0';
-                    break;
-
-                case 'a':
-                    t.c = '\a';
-                    break;
-
-                case 'b':
-                    t.c = '\b';
-                    break;
-
-                case 't':
-                    t.c = '\t';
-                    break;
-
-                case 'n':
-                    t.c = '\n';
-                    break;
-
-                case 'v':
-                    t.c = '\v';
-                    break;
-
-                case 'f':
-                    t.c = '\f';
-                    break;
-
-                case 'r':
-                    t.c = '\r';
-                    break;
-
-                default:
-                    t.c = c;
-                    break;
-                }
-                escape = false;
-                seq.push_back(t);
-            }else{
-                if(c == '\\'){
-                    escape = true;
-                    continue;
-                }
-                t.c = c;
-                switch(c){
-                case '|':
-                    t.type = regex_parser::token_vertical_bar;
-                    break;
-
-                case '*':
-                    t.type = regex_parser::token_asterisk;
-                    break;
-
-                case '+':
-                    t.type = regex_parser::token_plus;
-                    break;
-
-                case '?':
-                    t.type = regex_parser::token_question;
-                    break;
-
-                case '[':
-                    t.type = regex_parser::token_l_bracket;
-                    break;
-
-                case ']':
-                    t.type = regex_parser::token_r_bracket;
-                    break;
-
-                case '(':
-                    t.type = regex_parser::token_l_paren;
-                    break;
-
-                case ')':
-                    t.type = regex_parser::token_r_paren;
-                    break;
-
-                case '-':
-                    t.type = regex_parser::token_hyphen;
-                    break;
-
-                default:
-                    t.type = regex_parser::token_charactor;
-                    break;
-                }
-                seq.push_back(t);
-            }
-        }
-        return seq;
-    }
 } // namespace regex_parser
 
 
@@ -435,32 +719,171 @@ namespace automaton{
     lexer::parsing_error::parsing_error(const std::string &what) : std::runtime_error(what){}
 
     void lexer::add_rule(const std::string &str, const std::string &token_name, const std::string &action){
+        regexp_parser::semantic_action sa;
+        regexp_parser::parser<regexp_parser::regexp_ast*, regexp_parser::semantic_action> parser(sa);
+        for(auto c : str){
+            switch(c){
+            case '|':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_or, ptr);
+                }
+                break;
+
+            case '*':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_star, ptr);
+                }
+                break;
+
+            case '+':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_plus, ptr);
+                }
+                break;
+
+            case '?':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_question, ptr);
+                }
+                break;
+
+            case '(':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_left_pare, ptr);
+                }
+                break;
+
+            case ')':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_right_pare, ptr);
+                }
+                break;
+
+            case '{':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_left_brace, ptr);
+                }
+                break;
+
+            case '}':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_right_brace, ptr);
+                }
+                break;
+
+            case '.':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_dot, ptr);
+                }
+                break;
+
+            case '\\':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_backslash, ptr);
+                }
+                break;
+
+            case '[':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_set_left_bracket, ptr);
+                }
+                break;
+
+            case '^':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_hat, ptr);
+                }
+                break;
+
+            case ']':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_set_right_bracket, ptr);
+                }
+                break;
+
+            case '-':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_minus, ptr);
+                }
+                break;
+
+            case ',':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_comma, ptr);
+                }
+                break;
+
+            case ':':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_colon, ptr);
+                }
+                break;
+
+            case '\'':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_quote, ptr);
+                }
+                break;
+
+            case '0': case '1': case '2': case '3': case '4':
+            case '5': case '6': case '7': case '8': case '9':
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_number, ptr);
+                }
+                break;
+
+            default:
+                {
+                    regexp_parser::regexp_char *ptr = new regexp_parser::regexp_char;
+                    ptr->c = c;
+                    parser.post(regexp_parser::regexp_token_symbol_any_non_metacharacter, ptr);
+                }
+                break;
+            }
+        }
+        parser.post(regexp_parser::regexp_token_0, nullptr);
+        regexp_parser::regexp_ast *root;
+        if(!parser.accept(root)){
+            throw std::runtime_error("regexp error '" + token_name + "'");
+        }
+
         token_info_vector.push_back(token_info{ token_name, action });
-
-        std::vector<regex_parser::token> seq = regex_parser::tokenize(str.begin(), str.end());
-
-        regex_parser::semantic_action sa;
-        regex_parser::Parser<regex_parser::node*, regex_parser::semantic_action> parser(sa);
-
-        for(auto &i : seq){
-            regex_parser::node *p = nullptr;
-            if(i.type == regex_parser::token_charactor){
-                p = new regex_parser::node;
-                p->c = i.c;
-                p->op_type = regex_parser::node::op_charactor;
-            }
-            parser.post(static_cast<regex_parser::Token>(i.type), p);
-        }
-        parser.post(regex_parser::token_eof, nullptr);
-
-        std::unique_ptr<regex_parser::node> root;
-        {
-            regex_parser::node *root_;
-            if(!parser.accept(root_)){
-                throw parsing_error("parsing error (regular expression) : " + str);
-            }
-            root.reset(root_);
-        }
 
         std::size_t end;
         if(node_pool.empty()){
@@ -545,6 +968,16 @@ namespace automaton{
                 continue;
             }
 
+            std::map<std::size_t, std::set<int>> edge_inv_map;
+            std::map<std::size_t, std::set<int>> other_edge_inv_map;
+            for(auto &j : node_pool[i].edge){
+                if(j.first >= -128 && j.first <= 127){
+                    edge_inv_map[j.second].insert(j.first);
+                }else{
+                    other_edge_inv_map[j.second].insert(j.first);
+                }
+            }
+
             ofile << indent() << "state_" << i << ":;\n";
             if(i == 1){
                 ofile << indent() << "if(iter == end){\n";
@@ -579,19 +1012,15 @@ namespace automaton{
 
             if(node_pool[i].edge.size() > 0){
                 ofile << indent() << "c = *iter;\n";
-
-                std::map<std::size_t, std::vector<std::size_t>> edge_inv_map;
-                for(auto &j : node_pool[i].edge){
-                    edge_inv_map[j.second].push_back(j.first);
-                }
                 ofile << indent() << "switch(c){\n";
                 for(auto &j : edge_inv_map){
                     bool nline = false;
-                    for(std::size_t k = 0; k < j.second.size(); ++k){
-                        if(j.second[k] == '\n'){
+                    std::size_t k = 0;
+                    for(auto kter = j.second.begin(); kter != j.second.end(); ++kter, ++k){
+                        if(*kter == '\n'){
                             nline = true;
                         }
-                        std::string str = std::to_string(j.second[k]);
+                        std::string str = std::to_string(*kter);
                         ofile << (k % 8 == 0 ? indent() : "") << "case " << [](std::size_t n){ std::string s; for(std::size_t i = 0; i < 3 - n; ++i){ s += " "; } return s; }(str.size()) << str << ((k + 1) % 8 == 0 ? ":\n" : ": ");
                     }
                     if((j.second.size()) % 8 != 0){

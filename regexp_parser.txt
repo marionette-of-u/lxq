@@ -1,38 +1,223 @@
-%token charactor<node*> vertical_bar dot asterisk plus question l_bracket r_bracket l_paren r_paren concat hyphen;
-%namespace regex_parser;
+<token_desc> regexp_token{
+    symbol_or<regexp_parser::regexp_ast*>,
+    symbol_star<regexp_parser::regexp_ast*>,
+    symbol_plus<regexp_parser::regexp_ast*>,
+    symbol_question<regexp_parser::regexp_ast*>,
+    symbol_left_pare<regexp_parser::regexp_ast*>,
+    symbol_right_pare<regexp_parser::regexp_ast*>,
+    symbol_left_brace<regexp_parser::regexp_ast*>,
+    symbol_right_brace<regexp_parser::regexp_ast*>,
+    symbol_dot<regexp_parser::regexp_ast*>,
+    symbol_eos<regexp_parser::regexp_ast*>,
+    symbol_backslash<regexp_parser::regexp_ast*>,
+    symbol_set_left_bracket<regexp_parser::regexp_ast*>,
+    symbol_hat<regexp_parser::regexp_ast*>,
+    symbol_set_right_bracket<regexp_parser::regexp_ast*>,
+    symbol_minus<regexp_parser::regexp_ast*>,
+    symbol_comma<regexp_parser::regexp_ast*>,
+    symbol_colon<regexp_parser::regexp_ast*>,
+    symbol_quote<regexp_parser::regexp_ast*>,
+    symbol_any_non_metacharacter<regexp_parser::regexp_ast*>,
+    symbol_number<regexp_parser::regexp_ast*>;
+}
 
-S<node*>
-	: [make_identity] LevelC(0)
-	;
+<grammar> regexp_parser{
+    regexp<regexp_parser::regexp_ast*>
+        : [identity] lv2_regexp(0)
+        ;
 
-LevelC<node*>
-	: [make_or]       LevelB(0) vertical_bar LevelC(1)
-	| [make_concat]   LevelB(0) LevelC(1)
-	| [make_identity] LevelB(0)
-	;
+    lv2_regexp<regexp_parser::regexp_ast*>
+        : [identity] union(0)
+        | [identity] lv1_regexp(0)
+        ;
 
-LevelB<node*>
-	: [make_kleene]      LevelA(0) asterisk
-	| [make_kleene_plus] LevelA(0) plus
-	| [make_one_or_zero] LevelA(0) question
-	| [make_identity]    LevelA(0)
-	;
+    union<regexp_parser::regexp_ast*>
+        : [make_union] lv2_regexp(0) symbol_or(2) lv1_regexp(1)
+        ;
 
-LevelA<node*>
-	: [make_charactor] charactor(0)
-	| [make_dot]       dot
-	| [make_class]     l_bracket CharactorSequence(0) r_bracket
-	| [make_identity]  l_paren LevelC(0) r_paren
-	;
+    lv1_regexp<regexp_parser::regexp_ast*>
+        : [identity] concatenation(0)
+        | [identity] lv0_regexp(0)
+        ;
 
-CharactorSequence<node*>
-	: [make_seq] charactor(0)
-	| [make_seq] CharactorSequence(0) charactor(1)
-	| [make_class_range] CharactorRange(0)
-	| [make_class_range] CharactorSequence(0) CharactorRange(1)
-	;
+    concatenation<regexp_parser::regexp_ast*>
+        : [make_concat] lv1_regexp(0) lv0_regexp(1)
+        ;
 
-CharactorRange<node*>
-	: [make_range] charactor(0) hyphen charactor(1)
-	;
+    lv0_regexp<regexp_parser::regexp_ast*>
+        : [identity] star(0)
+        | [identity] plus(0)
+        | [identity] question(0)
+        | [identity] n_to_m(0)
+        | [identity] elementary_regexp(0)
+        ;
 
+    star<regexp_parser::regexp_ast*>
+        : [make_kleene] elementary_regexp(0) symbol_star(1)
+        ;
+
+    plus<regexp_parser::regexp_ast*>
+        : [make_kleene_plus] elementary_regexp(0) symbol_plus(1)
+        ;
+
+    question<regexp_parser::regexp_ast*>
+        : [make_one_or_zero] elementary_regexp(0) symbol_question(1)
+        ;
+
+    n_to_m<regexp_parser::regexp_ast*>
+        : [make_n_to_m] elementary_regexp(0) symbol_left_brace(3) value(1) m_of_n_to_m(2) symbol_right_brace(4)
+        ;
+
+    m_of_n_to_m<regexp_parser::regexp_ast*>
+        : [make_m] symbol_comma(1) value_opt(0)
+        | []
+        ;
+
+    value_opt<regexp_parser::regexp_ast*>
+        : [identity] value(0)
+        | []
+        ;
+
+    value<regexp_parser::regexp_ast*>
+        : [make_char_seq] symbol_number(0)
+        | [make_char_seq] value(0) symbol_number(1)
+        ;
+
+    char_seq<regexp_parser::regexp_ast*>
+        : [make_char_seq] char(0)
+        | [make_char_seq] char_seq(0) char(1)
+        ;
+
+    elementary_regexp<regexp_parser::regexp_ast*>
+        : [make_elementary_regexp] group(0)
+        | [make_elementary_regexp] set_or_class(0)
+        | [make_elementary_regexp] str(0)
+        | [make_elementary_regexp] any(0)
+        | [make_elementary_regexp] after_nline(0)
+        | [make_elementary_regexp] eos(0)
+        | [make_elementary_regexp] char(0)
+        ;
+
+    group<regexp_parser::regexp_ast*>
+        : [make_group] symbol_left_pare(1) regexp(0) symbol_right_pare(2)
+        ;
+
+    str<regexp_parser::regexp_ast*>
+        : [make_str] symbol_quote(1) str_char_seq_opt(0) symbol_quote(2)
+        ;
+
+    str_char_seq_opt<regexp_parser::regexp_ast*>
+        : [identity] str_char_seq(0)
+        | []
+        ;
+
+    str_char_seq<regexp_parser::regexp_ast*>
+        : [make_char_seq] str_char(0)
+        | [make_char_seq] str_char_seq(0) str_char(1)
+        ;
+
+    str_char<regexp_parser::regexp_ast*>
+        : [make_char] symbol_or(0)
+        | [make_char] symbol_star(0)
+        | [make_char] symbol_plus(0)
+        | [make_char] symbol_question(0)
+        | [make_char] symbol_left_pare(0)
+        | [make_char] symbol_right_pare(0)
+        | [make_char] symbol_left_brace(0)
+        | [make_char] symbol_right_brace(0)
+        | [make_char] symbol_dot(0)
+        | [make_char] symbol_eos(0)
+        | [make_char] symbol_set_left_bracket(0)
+        | [make_char] symbol_hat(0)
+        | [make_char] symbol_set_right_bracket(0)
+        | [make_char] symbol_minus(0)
+        | [make_char] symbol_comma(0)
+        | [make_char] symbol_colon(0)
+        | [make_char] symbol_any_non_metacharacter(0)
+        | [make_char] symbol_number(0)
+        | [make_char] symbol_backslash(1) str_escape_char(0)
+        ;
+
+    str_escape_char<regexp_parser::regexp_ast*>
+        : [identity] symbol_backslash(0)
+        | [identity] symbol_quote(0)
+        ;
+
+    any<regexp_parser::regexp_ast*>
+        : [make_any] symbol_dot(0)
+        ;
+
+    after_nline<regexp_parser::regexp_ast*>
+        : [make_after_nline] symbol_hat(1) regexp(0)
+        ;
+
+    eos<regexp_parser::regexp_ast*>
+        : [make_eos] symbol_eos(0)
+        ;
+
+    char<regexp_parser::regexp_ast*>
+        : [make_char] symbol_any_non_metacharacter(0)
+        | [make_char] symbol_number(0)
+        | [make_char] symbol_backslash(1) metacharacter(0)
+        ;
+
+    metacharacter<regexp_parser::regexp_ast*>
+        : [identity] symbol_or(0)
+        | [identity] symbol_star(0)
+        | [identity] symbol_plus(0)
+        | [identity] symbol_question(0)
+        | [identity] symbol_left_pare(0)
+        | [identity] symbol_right_pare(0)
+        | [identity] symbol_left_brace(0)
+        | [identity] symbol_right_brace(0)
+        | [identity] symbol_dot(0)
+        | [identity] symbol_eos(0)
+        | [identity] symbol_backslash(0)
+        | [identity] symbol_set_left_bracket(0)
+        | [identity] symbol_hat(0)
+        | [identity] symbol_set_right_bracket(0)
+        | [identity] symbol_minus(0)
+        | [identity] symbol_comma(0)
+        | [identity] symbol_colon(0)
+        | [identity] symbol_quote(0)
+        | [identity] symbol_any_non_metacharacter(0)
+        | [identity] symbol_number(0)
+        ;
+
+    set_or_class<regexp_parser::regexp_ast*>
+        : [make_set_or_class] symbol_set_left_bracket(1) set_or_class_content(0) symbol_set_right_bracket(2)
+        ;
+
+    set_or_class_content<regexp_parser::regexp_ast*>
+        : [identity] class_content(0)
+        | [identity] set_content(0)
+        ;
+
+    class_content<regexp_parser::regexp_ast*>
+        : [make_class_content] symbol_colon(1) char_seq(0) symbol_colon(2)
+        ;
+
+    set_content<regexp_parser::regexp_ast*>
+        : [make_set_content] hat_opt(1) set_items(0)
+        ;
+
+    hat_opt<regexp_parser::regexp_ast*>
+        : [identity] symbol_hat(0)
+        | []
+        ;
+
+    set_items<regexp_parser::regexp_ast*>
+        : [identity] set_item(0)
+        | [make_set_item] set_items(0) set_item(1)
+        ;
+
+    set_item<regexp_parser::regexp_ast*>
+        : [make_set_item] range(0)
+        | [make_set_item] char(0)
+        | [make_set_item] set_or_class(0)
+        ;
+
+    range<regexp_parser::regexp_ast*>
+        : [make_range] char(0) symbol_minus char(1)
+        ;
+}

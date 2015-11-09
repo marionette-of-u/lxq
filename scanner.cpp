@@ -826,10 +826,11 @@ namespace lxq{
                     value_stack.push_back(std::move(p.second.second.call(*this, arg)));
                     state_stack.push_back(table.goto_table.find(state_stack.back())->second.find(p.second.first)->second);
                 }else if(i.action == parsing_table_item::enum_action::accept){
-                    if(state_stack.size() != 1){
+                    if(value_stack.size() != 1){
                         break;
                     }
                     value = std::move(value_stack.front());
+                    ++first;
                     break;
                 }
             }
