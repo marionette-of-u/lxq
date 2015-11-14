@@ -988,17 +988,19 @@ namespace automaton{
             }else if(node_pool[i].token_name){
                 ofile << indent() << "if(iter == end){\n";
                 ++indent;
-                ofile << indent() << "token_type t;\n";
-                ofile << indent() << "t.first = first;\n";
-                ofile << indent() << "t.last = iter;\n";
-                ofile << indent() << "t.line_num = line_num;\n";
-                ofile << indent() << "t.char_num = char_num;\n";
-                ofile << indent() << "t.word_num = word_num++;\n";
-                ofile << indent() << "t.identifier = token_type::identifier_type::" << *node_pool[i].token_name << ";\n";
-                if(node_pool[i].action->size() > 0){
-                    ofile << indent() << "t.value = std::move(std::unique_ptr<lxq::semantic_data>(action." << *node_pool[i].action << "(first, iter)));\n";
+                if(*node_pool[i].action != "drop"){
+                    ofile << indent() << "token_type t;\n";
+                    ofile << indent() << "t.first = first;\n";
+                    ofile << indent() << "t.last = iter;\n";
+                    ofile << indent() << "t.line_num = line_num;\n";
+                    ofile << indent() << "t.char_num = char_num;\n";
+                    ofile << indent() << "t.word_num = word_num++;\n";
+                    ofile << indent() << "t.identifier = token_type::identifier_type::" << *node_pool[i].token_name << ";\n";
+                    if(node_pool[i].action->size() > 0){
+                        ofile << indent() << "t.value = std::move(std::unique_ptr<lxq::semantic_data>(action." << *node_pool[i].action << "(first, iter)));\n";
+                    }
+                    ofile << indent() << "result.push_back(std::move(t));\n";
                 }
-                ofile << indent() << "result.push_back(std::move(t));\n";
                 ofile << indent() << "goto end_of_tokenize;\n";
                 --indent;
                 ofile << indent() << "}\n";
@@ -1055,17 +1057,19 @@ namespace automaton{
             }else if(node_pool[i].token_name){
                 ofile << indent() << "{\n";
                 ++indent;
-                ofile << indent() << "token_type t;\n";
-                ofile << indent() << "t.first = first;\n";
-                ofile << indent() << "t.last = iter;\n";
-                ofile << indent() << "t.line_num = line_num;\n";
-                ofile << indent() << "t.char_num = char_num;\n";
-                ofile << indent() << "t.word_num = word_num++;\n";
-                ofile << indent() << "t.identifier = token_type::identifier_type::" << *node_pool[i].token_name << ";\n";
-                if(node_pool[i].action->size() > 0){
-                    ofile << indent() << "t.value = std::move(std::unique_ptr<lxq::semantic_data>(action." << *node_pool[i].action << "(first, iter)));\n";
+                if(*node_pool[i].action != "drop"){
+                    ofile << indent() << "token_type t;\n";
+                    ofile << indent() << "t.first = first;\n";
+                    ofile << indent() << "t.last = iter;\n";
+                    ofile << indent() << "t.line_num = line_num;\n";
+                    ofile << indent() << "t.char_num = char_num;\n";
+                    ofile << indent() << "t.word_num = word_num++;\n";
+                    ofile << indent() << "t.identifier = token_type::identifier_type::" << *node_pool[i].token_name << ";\n";
+                    if(node_pool[i].action->size() > 0){
+                        ofile << indent() << "t.value = std::move(std::unique_ptr<lxq::semantic_data>(action." << *node_pool[i].action << "(first, iter)));\n";
+                    }
+                    ofile << indent() << "result.push_back(std::move(t));\n";
                 }
-                ofile << indent() << "result.push_back(std::move(t));\n";
                 ofile << indent() << "first = iter;\n";
                 ofile << indent() << "goto state_1;\n";
                 --indent;

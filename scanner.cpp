@@ -431,7 +431,7 @@ namespace scanner{
         {
             scanning_exception_seq exception_seq;
             for(auto &iter : regexp_symbol_data_map){
-                if(symbol_data_map.find(iter.first) == symbol_data_map.end()){
+                if(symbol_data_map.find(iter.first) == symbol_data_map.end() && iter.second.action && iter.second.action->token.value.to_str() != "drop"){
                     exception_seq.push_back(scanning_exception("unused regexp '" + iter.first.value.to_str() + "'.", iter.first.char_num, iter.first.word_num, iter.first.line_num));
                 }
             }
