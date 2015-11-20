@@ -1,0 +1,36 @@
+<lexer> mylexer{
+    mul = _"\*"_;
+    div = _"/"_;
+    add = _"\+"_;
+    sub = _"\-"_;
+    l_paren = _"\("_;
+    r_paren = _"\)"_;
+
+    [make_id]
+    id = _"[0-9]+"_;
+
+    [drop]
+    space = _" +"_;
+}
+
+<token> mytoken{
+	<right>{ unary_minus; }
+    <left>{
+        mul, div;
+        add, sub;
+    }
+    l_paren, r_paren;
+    id;
+}
+
+<parser> myparser{
+    E
+        : [make_add] E(0) add E(1)
+        | [make_sub] E(0) sub E(1)
+        | [make_mlt] E(0) mul E(1)
+        | [make_div] E(0) div E(1)
+        | [identity] l_paren E(0) r_paren
+        | [make_inv] <unary_minus> sub E(0)
+        | [identity] id(0)
+        ;
+}

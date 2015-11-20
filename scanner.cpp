@@ -47,6 +47,33 @@ namespace scanner{
         line_count = 0;
     }
 
+    void init_lexer(lexer &lex){
+        lex.new_regex("( |\t|\r|\n|\r\n|(//[^\r\n]*(\r|\n|\r\n)))+", whitespace_functor()());
+        lex.new_regex("[0-9]+", value);
+        lex.new_regex(",", comma);
+        lex.new_regex("\\.", dot);
+        lex.new_regex("\\?", question);
+        lex.new_regex("!", exclamation);
+        lex.new_regex("\\+", plus);
+        lex.new_regex("-", hyphen);
+        lex.new_regex("\\*", asterisk);
+        lex.new_regex("\\/", slash);
+        lex.new_regex(":", colon);
+        lex.new_regex(";", semicolon);
+        lex.new_regex("\\[", l_square_bracket);
+        lex.new_regex("\\]", r_square_bracket);
+        lex.new_regex("\\{", l_curly_bracket);
+        lex.new_regex("\\}", r_curly_bracket);
+        lex.new_regex("<", l_bracket);
+        lex.new_regex(">", r_bracket);
+        lex.new_regex("\\(", l_round_paren);
+        lex.new_regex("\\)", r_round_paren);
+        lex.new_regex("\\|", vertical_bar);
+        lex.new_regex("=", equal);
+        lex.new_regex("_\".*\"_", string);
+        lex.new_regex("[a-zA-Z_][a-zA-Z0-9_]*", identifier);
+    }
+
     void lexer::tokenize(vstring::const_iterator first, vstring::const_iterator last){
         while(first != last){
             bool match = false;
@@ -310,15 +337,23 @@ namespace scanner{
         for(auto &iter : regexp_symbol_data_map){
             sorted_regexp_map.insert(std::make_pair(iter.second.priority, &iter));
         }
+        scanning_exception_seq exception_seq;
         for(auto &iter : sorted_regexp_map){
-            std::string str = iter.second->second.regexp.to_str();
-            automaton_lexer.add_rule(
-                str.substr(1, str.size() - 2),
-                iter.second->first.value.to_str(),
-                iter.second->second.action
-                    ? iter.second->second.action->token.value.to_str()
-                    : ""
-            );
+            try{
+                std::string str = iter.second->second.regexp.to_str();
+                automaton_lexer.add_rule(
+                    str.substr(2, str.size() - 4),
+                    iter.second->first.value.to_str(),
+                    iter.second->second.action
+                        ? iter.second->second.action->token.value.to_str()
+                        : ""
+                );
+            }catch(...){
+                exception_seq.push_back(scanning_exception("invalid regexp.", iter.second->first.char_num, iter.second->first.word_num, iter.second->first.line_num));
+            }
+        }
+        if(exception_seq.size() > 0){
+            throw exception_seq;
         }
 
         get_top_level_seq_statements(token_body);
@@ -506,10 +541,17 @@ namespace scanner{
                         break;
                     }
                 }
+                std::string item_str[2];
+                lalr_generator_type::item const *item[] = { i.lhs.item_ptr, i.rhs.item_ptr };
+                for(int j = 0; j < 2; ++j){
+                    for(auto &s : item[j]->rhs){
+                        item_str[j] += " " + lalr_generator.symbol_manager.to_str(s).to_str();
+                    }
+                }
                 exception_seq.push_back(
                     std::runtime_error(
                         act_str[0] + "/" + act_str[1] + " conflict, " +
-                        lalr_generator.symbol_manager.to_str(i.lhs.item_ptr->lhs).to_str() + " vs " + lalr_generator.symbol_manager.to_str(i.rhs.item_ptr->lhs).to_str() + "."
+                        lalr_generator.symbol_manager.to_str(i.lhs.item_ptr->lhs).to_str() + " :" + item_str[0] + " vs " + lalr_generator.symbol_manager.to_str(i.rhs.item_ptr->lhs).to_str() + " :" + item_str[1] + "."
                     )
                 );
             }
@@ -949,6 +991,11 @@ namespace lxq{
             scanning_data.generate_cpp_semantic_data(lxq_hpp);
             scanning_data.automaton_lexer.generate_cpp(lexer_hpp, scanning_data.regexp_namespace->token.value.to_str());
             scanning_data.generate_cpp(grammar_hpp);
+        }catch(lalr_generator_type::exception_seq seq){
+            for(std::runtime_error &e : seq){
+                std::cout << e.what() << std::endl;
+            }
+            return;
         }catch(std::runtime_error e){
             std::cout << e.what() << std::endl;
             return;

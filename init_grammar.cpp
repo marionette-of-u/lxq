@@ -5,33 +5,6 @@ namespace scanner{
         return symbol_manager.set_nonterminal(str);
     }
 
-    void init_lexer(lexer &lex){
-        lex.new_regex("( |\t|\r|\n|\r\n|(//[^\r\n]*(\r|\n|\r\n)))+", whitespace_functor()());
-        lex.new_regex("[0-9]+", value);
-        lex.new_regex(",", comma);
-        lex.new_regex("\\.", dot);
-        lex.new_regex("\\?", question);
-        lex.new_regex("!", exclamation);
-        lex.new_regex("\\+", plus);
-        lex.new_regex("-", hyphen);
-        lex.new_regex("\\*", asterisk);
-        lex.new_regex("\\/", slash);
-        lex.new_regex(":", colon);
-        lex.new_regex(";", semicolon);
-        lex.new_regex("\\[", l_square_bracket);
-        lex.new_regex("\\]", r_square_bracket);
-        lex.new_regex("\\{", l_curly_bracket);
-        lex.new_regex("\\}", r_curly_bracket);
-        lex.new_regex("<", l_bracket);
-        lex.new_regex(">", r_bracket);
-        lex.new_regex("\\(", l_round_paren);
-        lex.new_regex("\\)", r_round_paren);
-        lex.new_regex("\\|", vertical_bar);
-        lex.new_regex("=", equal);
-        lex.new_regex("\"([^\"]|\\\\\")+\"", string);
-        lex.new_regex("[a-zA-Z_][a-zA-Z0-9_]*", identifier);
-    }
-
     void init_grammar(scanner::grammar &grammar){
         using seq = scanner::term_sequence;
 

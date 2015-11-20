@@ -592,11 +592,11 @@ namespace regexp_parser{
         }
 
         void syntax_error(){
-            throw;
+            throw std::runtime_error("");
         }
 
         void stack_overflow(){
-            throw;
+            throw std::runtime_error("");
         }
 
     private:
@@ -721,7 +721,7 @@ namespace automaton{
     void lexer::add_rule(const std::string &str, const std::string &token_name, const std::string &action){
         regexp_parser::semantic_action sa;
         regexp_parser::parser<regexp_parser::regexp_ast*, regexp_parser::semantic_action> parser(sa);
-        for(auto c : str){
+        for(char c : str){
             switch(c){
             case '|':
                 {
