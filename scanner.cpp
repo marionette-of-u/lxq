@@ -160,6 +160,64 @@ namespace scanner{
         }
     }
 
+    void scanning_data_type::check_recover_rhs_seq(rhs_seq const &seq){
+        bool has_error_token = false;
+        for(auto iter = seq.begin(); iter != seq.end(); ++iter){
+            std::string str = iter->identifier.value.to_str();
+            if(iter == seq.begin()){
+                if(str == "error"){
+                    if(!iter->arg.value.empty()){
+                        expr_statements_error.push_back(
+                            scanning_exception(
+                                "invalid error token.",
+                                iter->arg.char_num,
+                                iter->arg.word_num,
+                                iter->arg.line_num
+                            )
+                        );
+                        return;
+                    }
+                    has_error_token = true;
+                }
+            }else{
+                if(str == "error"){
+                    expr_statements_error.push_back(
+                        scanning_exception(
+                            "invalid error token.",
+                            iter->identifier.char_num,
+                            iter->identifier.word_num,
+                            iter->identifier.line_num
+                        )
+                    );
+                    return;
+                }else if(has_error_token){
+                    if(!iter->arg.value.empty()){
+                        expr_statements_error.push_back(
+                            scanning_exception(
+                                "invalid error token.",
+                                iter->arg.char_num,
+                                iter->arg.word_num,
+                                iter->arg.line_num
+                            )
+                        );
+                        return;
+                    }
+                    if(regexp_symbol_data_map.find(iter->identifier) == regexp_symbol_data_map.end()){
+                        expr_statements_error.push_back(
+                            scanning_exception(
+                                "recovery rhs element should be terminal symbol.",
+                                iter->identifier.char_num,
+                                iter->identifier.word_num,
+                                iter->identifier.line_num
+                            )
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     void scanning_data_type::get_rhs_seq(ast const *ptr, rhs_seq &seq){
         ast const *identifier, *arg;
         if(ptr->nodes.size() == 3){
@@ -181,6 +239,7 @@ namespace scanner{
         rhs_seq s;
         if(!ptr->token.value.empty()){
             get_rhs_seq(ptr->nodes[0], s);
+            check_recover_rhs_seq(s);
         }
         return s;
     }
@@ -209,6 +268,7 @@ namespace scanner{
 
     void scanning_data_type::get_expr(ast const *ptr){
         rhs_seq_set s;
+        ordered_lhs.push_back(ptr->nodes[0]->token);
         get_rhs(ptr->nodes[2], s);
         auto p = rules.insert(std::make_pair(ptr->nodes[0]->nodes[0]->token, s));
         if(!p.second){
@@ -238,6 +298,12 @@ namespace scanner{
             if(ptr->nodes[1]->token.term != semicolon){
                 get_top_level_seq_statements_element(ptr->nodes[1]);
             }
+        }
+    }
+
+    void scanning_data_type::check_reserved_token(token_type const &token){
+        if(token.value.to_str() == "error"){
+            identifier_seq_error.push_back(scanning_exception("'error' is reserved token.", token.char_num, token.word_num, token.line_num));
         }
     }
 
@@ -291,6 +357,7 @@ namespace scanner{
         }else{
             identifier = ptr->nodes[0];
         }
+        check_reserved_token(identifier->token);
         symbol_data_type symbol_data;
         symbol_data.priority = current_token_priority;
         symbol_data.dir = dir;
@@ -322,6 +389,9 @@ namespace scanner{
         }
         identifier = ptr->nodes[1];
         symbol_str = ptr->nodes[3];
+        if(identifier->token.value.to_str() == "error"){
+            throw scanning_exception("'error' is reserved token.", identifier->token.char_num, identifier->token.word_num, identifier->token.line_num);
+        }
         regexp_symbol_data_type data;
         data.action = action;
         data.priority = current_regexp_token_priority++;
@@ -373,11 +443,11 @@ namespace scanner{
             translator_token_to_lexer_map[info.name] = &info;
         }
         {
+            using linkdir_type = lalr_generator_type::linkdir;
             std::size_t iterate_count = 0;
             for(auto iter : ordered_token_iters){
                 lalr_generator_type::symbol_data_type symbol_data;
                 symbol_data.priority = iter->second.priority;
-                using linkdir_type = lalr_generator_type::linkdir;
                 symbol_data.dir = iter->second.dir == linkdir::nonassoc ? linkdir_type::nonassoc : iter->second.dir == linkdir::left ? linkdir_type::left : linkdir_type::right;
                 lalr_generator.symbol_data_map.insert(std::make_pair(lalr_generator.symbol_manager.set_terminal(iter->first.value), symbol_data));
                 if(translator_token_to_lexer_map.find(iter->first.value.to_str()) == translator_token_to_lexer_map.end()){
@@ -387,6 +457,14 @@ namespace scanner{
                 }
                 ++iterate_count;
             }
+
+            lalr_generator_type::symbol_data_type symbol_data;
+            symbol_data.priority = 0;
+            symbol_data.dir = linkdir_type::nonassoc;
+            static vstring error = { 'e', 'r', 'r', 'o', 'r' };
+            vstring_range error_vstring_range(error.begin(), error.end());
+            lalr_generator.symbol_manager.register_special_term(error_vstring_range, error_token_functor()());
+            lalr_generator.symbol_data_map.insert(std::make_pair(lalr_generator.symbol_manager.set_terminal(error_vstring_range), symbol_data));
         }
 
         get_expr_statements(expr_statements);
@@ -394,7 +472,8 @@ namespace scanner{
             throw expr_statements_error;
         }
 
-        for(auto &iter : rules){
+        for(auto &lhs : ordered_lhs){
+            auto &iter = *rules.find(lhs);
             lalr_generator_type::rule_rhs &rhs = lalr_generator.grammar[lalr_generator.symbol_manager.set_nonterminal(iter.first.value)];
             for(auto &seq : iter.second){
                 seq.make_arg_to_element_map();
@@ -428,7 +507,7 @@ namespace scanner{
 
                         auto token_map_iter = token_map.find(term_iter.identifier);
                         auto lhs_map_iter = lhs_map.find(term_iter.identifier);
-                        if(token_map_iter == token_map.end() && lhs_map_iter == lhs_map.end()){
+                        if(token_map_iter == token_map.end() && lhs_map_iter == lhs_map.end() && term_iter.identifier.value.to_str() != "error"){
                             exception_seq.push_back(scanning_exception("undefined token, '" + term_iter.identifier.value.to_str() + "'.", term_iter.identifier.char_num, term_iter.identifier.word_num, term_iter.identifier.line_num));
                             continue;
                         }
@@ -510,6 +589,32 @@ namespace scanner{
         lalr_generator_type::states::iterator first_state;
         lalr_generator_type::term_set terminal_symbol_set = lalr_generator_type::make_terminal_symbol_set(lalr_generator.grammar);
         lalr_generator.make_follow_set(lalr_generator.grammar, s.lhs);
+
+        for(auto &iter : rules){
+            lalr_generator_type::rule_rhs &rhs = lalr_generator.grammar[lalr_generator.symbol_manager.set_nonterminal(iter.first.value)];
+            lalr_generator_type::rule_rhs::iterator error_recover_follow = rhs.end();
+            std::set<term_type> used_error_recover_rule;
+            for(lalr_generator_type::rule_rhs::iterator jter = rhs.begin(); jter != rhs.end(); ++jter){
+                auto rule = *jter;
+                if(rule.size() >= 2 && *rule.begin() == error_token_functor()()){
+                    used_error_recover_rule.insert(*(rule.begin() + 1));
+                }else if(rule.size() == 1 && *rule.begin() == error_token_functor()()){
+                    error_recover_follow = jter;
+                }
+            }
+            if(error_recover_follow != rhs.end()){
+                auto &follow_set = lalr_generator.follow_set.find(lalr_generator.symbol_manager.get(iter.first.value))->second;
+                for(auto &term : follow_set){
+                    if(used_error_recover_rule.find(term) == used_error_recover_rule.end()){
+                        lalr_generator_type::term_sequence term_sequence({ error_token_functor()(), term }, error_recover_follow->semantic_data);
+                        term_sequence.tag = error_recover_follow->tag;
+                        rhs.insert(term_sequence);
+                    }
+                }
+                rhs.erase(error_recover_follow);
+            }
+        }
+
         lalr_generator.lr0_kernel_items(lalr_generator.grammar, states_prime, states, first_state, terminal_symbol_set, s);
         lalr_generator.make_goto_map(lalr_generator.grammar, terminal_symbol_set, states_prime, states, s);
         lalr_generator.completion_lookahead(lalr_generator.grammar, states, first_state, s);
@@ -669,19 +774,20 @@ namespace lxq{
                 os << iter.first << ",";
                 os << R"text(
                             std::make_pair()text";
-                os << iter.second.first << ", term_sequence_data{ " << iter.second.second->size() << ", [](parser &p, arg_type const &arg){ return call_" << iter.second.second->semantic_data.action.to_str() << "(p, ";
-                {
-                    auto *p = iter.second.second->semantic_data.arg_to_element;
-                    if(p){
-                        for(std::size_t i = 0; i < p->size(); ++i){
-                            os << "arg[" << p->at(i)->display_pos << "]";
-                            if(i + 1 != p->size()){
-                                os << ", ";
+                if(iter.second.second->semantic_data.action.empty()){
+                    os << iter.second.first << ", term_sequence_data{ " << iter.second.second->size() << ", [](parser &p, arg_type const &arg){ return std::unique_ptr<lxq::semantic_data>(nullptr); } })";
+                }else{
+                    os << iter.second.first << ", term_sequence_data{ " << iter.second.second->size() << ", [](parser &p, arg_type const &arg){ return call_" << iter.second.second->semantic_data.action.to_str() << "(p";
+                    {
+                        auto *p = iter.second.second->semantic_data.arg_to_element;
+                        if(p){
+                            for(std::size_t i = 0; i < p->size(); ++i){
+                                os << ", arg[" << p->at(i)->display_pos << "]";
                             }
                         }
                     }
+                    os << "); } })";
                 }
-                os << "); } })";
                 os << R"text(
                         ))text";
                 if(iterate_count + 1 < lalr_generator_make_result.n2r.size()){
@@ -790,18 +896,19 @@ namespace lxq{
 )text";
         std::set<vstring_range> generated_callfn;
         for(auto &iter : lalr_generator_make_result.n2r){
-            if(iter.second.first == -1 || generated_callfn.find(iter.second.second->semantic_data.action) != generated_callfn.end()){
+            if(
+                iter.second.first == -1 ||
+                generated_callfn.find(iter.second.second->semantic_data.action) != generated_callfn.end() ||
+                iter.second.second->semantic_data.action.empty()
+            ){
                 continue;
             }
             generated_callfn.insert(iter.second.second->semantic_data.action);
             auto *p = iter.second.second->semantic_data.arg_to_element;
-            os << "        static std::unique_ptr<semantic_data> call_" << iter.second.second->semantic_data.action.to_str() << "(parser &p,";
+            os << "        static std::unique_ptr<semantic_data> call_" << iter.second.second->semantic_data.action.to_str() << "(parser &p";
             if(p){
                 for(std::size_t i = 0; i < p->size(); ++i){
-                    os << "std::unique_ptr<semantic_data> const &v_" << i;
-                    if(i + 1 != p->size()){
-                        os << ", ";
-                    }
+                    os << ", std::unique_ptr<semantic_data> const &v_" << i;
                 }
             }
             os << "){";
@@ -840,12 +947,21 @@ namespace lxq{
                 token_type &token = *first;
                 term const &t = static_cast<term>(token.identifier);
                 std::size_t s = state_stack.back();
-                auto const &table_second(table.parsing_table.find(s)->second);
-                auto iter = table_second.find(t);
-                if(iter == table_second.end()){
-                    break;
+                auto const *table_second = &table.parsing_table.find(s)->second;
+                auto iter = table_second->find(t);
+                if(iter == table_second->end()){
+                    while(true){
+                        table_second = &table.parsing_table.find(state_stack.back())->second;
+                        iter = table_second->find(static_cast<term>(lxq::token_id::error));
+                        if(iter == table_second->end() || iter->second.action != parsing_table_item::enum_action::shift){
+                            state_stack.pop_back();
+                            value_stack.pop_back();
+                            continue;
+                        }
+                        break;
+                    }
                 }
-                parsing_table_item const &i = table.parsing_table.find(s)->second.find(t)->second;
+                parsing_table_item const &i = iter->second;
                 if(i.action == parsing_table_item::enum_action::shift){
                     state_stack.push_back(i.num);
                     value_stack.push_back(std::unique_ptr<semantic_data>(nullptr));
@@ -1000,11 +1116,11 @@ namespace lxq{
             std::cout << e.what() << std::endl;
             return;
         }catch(scanning_exception e){
-            std::cout << e.message << " : line " << e.line_num << ", char " << e.char_num << std::endl;
+            std::cout << e.message << " : line " << e.line_num + 1 << ", char " << e.char_num + 1 << std::endl;
             return;
         }catch(scanning_exception_seq seq){
             for(scanning_exception &e : seq){
-                std::cout << e.message << " : line " << e.line_num << ", char " << e.char_num << std::endl;
+                std::cout << e.message << " : line " << e.line_num + 1 << ", char " << e.char_num + 1 << std::endl;
             }
             return;
         }

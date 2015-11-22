@@ -5,6 +5,8 @@
     sub = _"\-"_;
     l_paren = _"\("_;
     r_paren = _"\)"_;
+    semicolon = _";"_;
+    recover = _"recover"_
 
     [make_id]
     id = _"[0-9]+"_;
@@ -19,11 +21,18 @@
         mul, div;
         add, sub;
     }
-    l_paren, r_paren;
+    l_paren, r_paren, recover, semicolon;
     id;
 }
 
 <parser> myparser{
+    Lines
+        : [print]   Lines E(0) semicolon
+        | []        Lines semicolon
+        | [recover] error recover semicolon
+        | []
+        ;
+
     E
         : [make_add] E(0) add E(1)
         | [make_sub] E(0) sub E(1)

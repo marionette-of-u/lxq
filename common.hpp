@@ -3,6 +3,36 @@
 
 #include <string>
 
+struct eos_functor{
+    inline int operator ()() const{
+        return std::numeric_limits<int>::max();
+    }
+};
+
+struct error_token_functor{
+    inline int operator ()() const{
+        return std::numeric_limits<int>::max() - 1;
+    }
+};
+
+struct whitespace_functor{
+    inline int operator ()() const{
+        return std::numeric_limits<int>::max() - 2;
+    }
+};
+
+struct dummy_functor{
+    inline int operator ()() const{
+        return std::numeric_limits<int>::max() - 3;
+    }
+};
+
+struct epsilon_functor{
+    inline int operator ()() const{
+        return 0;
+    }
+};
+
 struct indent_type{
     int n = 0;
     std::string operator()() const{

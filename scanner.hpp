@@ -74,30 +74,6 @@ namespace scanner{
 
     extern symbol_manager_type<std::string> symbol_manager;
 
-    struct eos_functor{
-        inline term_type operator ()() const{
-            return std::numeric_limits<int>::max();
-        }
-    };
-
-    struct dummy_functor{
-        inline term_type operator ()() const{
-            return std::numeric_limits<term_type>::max() - 1;
-        }
-    };
-
-    struct whitespace_functor{
-        inline term_type operator ()() const{
-            return std::numeric_limits<term_type>::max() - 2;
-        }
-    };
-
-    struct epsilon_functor{
-        inline term_type operator ()() const{
-            return 0;
-        }
-    };
-
     struct is_terminal_symbol{
         template<class G>
         inline bool operator ()(term_type a, G const &) const{
@@ -246,6 +222,7 @@ namespace scanner{
         };
 
         using rhs_seq_set = std::set<rhs_seq>;
+        std::vector<token_type> ordered_lhs;
         std::map<token_type, rhs_seq_set> rules;
         scanning_exception_seq expr_statements_error;
         lalr_generator_type::states states_prime, states;
@@ -260,9 +237,11 @@ namespace scanner{
         void generate_cpp(std::ostream &os);
 
     private:
+        void check_reserved_token(token_type const &token);
         ast const *get_arg_opt(ast const *ptr);
         ast const *get_semantic_action(ast const *ptr);
         ast const *get_tag_opt(ast const *ptr);
+        void check_recover_rhs_seq(rhs_seq const &rhs_seq_element);
         void get_rhs_seq(ast const *ptr, rhs_seq &seq);
         rhs_seq get_rhs_seq_opt(ast const *ptr);
         void get_rhs(ast const *ptr, rhs_seq_set &set);

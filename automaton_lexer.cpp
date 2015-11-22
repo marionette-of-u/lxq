@@ -929,7 +929,8 @@ namespace automaton{
             ofile << indent() << token_info_vector[i].name;
             ofile << " = " << token_info_vector[i].identifier << ",\n";
         }
-        ofile << indent() << "end = " << (std::numeric_limits<int>::max)() << "\n";
+        ofile << indent() << "error = " << error_token_functor()() << ",\n";
+        ofile << indent() << "end = " << eos_functor()() << "\n";
         --indent;
         ofile << indent() << "};\n";
         --indent;
