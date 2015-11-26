@@ -592,26 +592,12 @@ namespace scanner{
 
         for(auto &iter : rules){
             lalr_generator_type::rule_rhs &rhs = lalr_generator.grammar[lalr_generator.symbol_manager.set_nonterminal(iter.first.value)];
-            lalr_generator_type::rule_rhs::iterator error_recover_follow = rhs.end();
             std::set<term_type> used_error_recover_rule;
             for(lalr_generator_type::rule_rhs::iterator jter = rhs.begin(); jter != rhs.end(); ++jter){
                 auto rule = *jter;
                 if(rule.size() >= 2 && *rule.begin() == error_token_functor()()){
                     used_error_recover_rule.insert(*(rule.begin() + 1));
-                }else if(rule.size() == 1 && *rule.begin() == error_token_functor()()){
-                    error_recover_follow = jter;
                 }
-            }
-            if(error_recover_follow != rhs.end()){
-                auto &follow_set = lalr_generator.follow_set.find(lalr_generator.symbol_manager.get(iter.first.value))->second;
-                for(auto &term : follow_set){
-                    if(used_error_recover_rule.find(term) == used_error_recover_rule.end()){
-                        lalr_generator_type::term_sequence term_sequence({ error_token_functor()(), term }, error_recover_follow->semantic_data);
-                        term_sequence.tag = error_recover_follow->tag;
-                        rhs.insert(term_sequence);
-                    }
-                }
-                rhs.erase(error_recover_follow);
             }
         }
 
@@ -726,10 +712,38 @@ namespace lxq{
     class parser{
     private:
         using term = int;
+        using iterator = typename Lexer::iterator;
         using token_type = typename Lexer::token_type;
         using arg_type = std::vector<std::unique_ptr<semantic_data>>;
         using call_function = std::function<std::unique_ptr<semantic_data>(parser&, arg_type const&)>;
 
+    public:
+        // parsing_error
+        class parsing_error : public std::runtime_error{
+        public:
+            parsing_error(iterator first, iterator last, std::size_t line_num, std::size_t char_num, std::size_t word_num) :
+                std::runtime_error("parsing error."),
+                first(first),
+                last(last),
+                line_num(line_num),
+                char_num(char_num),
+                word_num(word_num)
+            {}
+
+            parsing_error(parsing_error const &other) :
+                std::runtime_error("parsing error."),
+                first(other.first),
+                last(other.last),
+                line_num(other.line_num),
+                char_num(other.char_num),
+                word_num(other.word_num)
+            {}
+
+            iterator first, last;
+            std::size_t line_num, char_num, word_num;
+        };
+
+    private:
         struct term_sequence_data{
             std::size_t norm;
             call_function call;
@@ -950,7 +964,7 @@ namespace lxq{
                 auto const *table_second = &table.parsing_table.find(s)->second;
                 auto iter = table_second->find(t);
                 if(iter == table_second->end()){
-                    while(true){
+                    while(state_stack.size() > 1){
                         table_second = &table.parsing_table.find(state_stack.back())->second;
                         iter = table_second->find(static_cast<term>(lxq::token_id::error));
                         if(iter == table_second->end() || iter->second.action != parsing_table_item::enum_action::shift){
@@ -959,6 +973,9 @@ namespace lxq{
                             continue;
                         }
                         break;
+                    }
+                    if(iter == table_second->end()){
+                        throw parsing_error(token.first, token.last, token.line_num, token.char_num, token.word_num);
                     }
                 }
                 parsing_table_item const &i = iter->second;
@@ -972,7 +989,7 @@ namespace lxq{
                     std::size_t norm = p.second.second.norm;
                     state_stack.resize(state_stack.size() - norm);
                     if(state_stack.empty()){
-                        break;
+                        throw parsing_error(token.first, token.last, token.line_num, token.char_num, token.word_num);
                     }
                     std::vector<std::unique_ptr<semantic_data>> arg;
                     arg.reserve(norm);
@@ -985,7 +1002,7 @@ namespace lxq{
                     state_stack.push_back(table.goto_table.find(state_stack.back())->second.find(p.second.first)->second);
                 }else if(i.action == parsing_table_item::enum_action::accept){
                     if(value_stack.size() != 1){
-                        break;
+                        throw parsing_error(token.first, token.last, token.line_num, token.char_num, token.word_num);
                     }
                     value = std::move(value_stack.front());
                     ++first;
