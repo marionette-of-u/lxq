@@ -6,7 +6,7 @@
     l_paren = _"\("_;
     r_paren = _"\)"_;
     semicolon = _";"_;
-    recover = _"recover"_
+    recover = _"recover"_;
 
     [make_id]
     id = _"[0-9]+"_;
@@ -16,7 +16,7 @@
 }
 
 <token> mytoken{
-	<right>{ unary_minus; }
+    <right>{ unary_minus; }
     <left>{
         mul, div;
         add, sub;
@@ -29,7 +29,6 @@
     Lines
         : [print]   Lines E(0) semicolon
         | []        Lines semicolon
-        | [recover] error recover semicolon
         | []
         ;
 
