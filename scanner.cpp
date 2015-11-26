@@ -974,6 +974,8 @@ namespace lxq{
                         }
                         break;
                     }
+                    table_second = &table.parsing_table.find(state_stack.back())->second;
+                    iter = table_second->find(static_cast<term>(lxq::token_id::error));
                     if(iter == table_second->end()){
                         throw parsing_error(token.first, token.last, token.line_num, token.char_num, token.word_num);
                     }

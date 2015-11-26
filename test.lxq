@@ -29,6 +29,7 @@
     Lines
         : [print]   Lines E(0) semicolon
         | []        Lines semicolon
+        | [recover] error recover semicolon
         | []
         ;
 
